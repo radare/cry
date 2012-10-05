@@ -12,6 +12,17 @@ mkdir -p ${KEYCHAIN}
 KEY=$KEYCHAIN/${USER}
 PUBKEY=$KEY
 
+cry_verify () {
+	[ -n "$1" ] && USER=$1
+	base64 -d | openssl rsautl -verify -inkey $KEYCHAIN/$USER \
+		-pubin 2>/dev/null ||exit 1
+}
+
+cry_sign() {
+	USER="$1"
+	openssl rsautl -sign -inkey $KEYCHAIN/$USER | base64
+}
+
 getprofile() {
 	awk 'BEGIN{A=0}{
 		if (/END PROFILE/) A=0
@@ -32,14 +43,20 @@ setprofile() {
 	echo "-----END PROFILE-----" >>$1
 }
 
+cry_getprofile() {
+	[ -n "$1" ] && USER=$1
+	[ -z "$KEYCHAIN/$USER" ] && die "Missing argument"
+	getprofile < $KEYCHAIN/$USER | cry_verify
+}
+
 keys_list() {(
 	cd ${KEYCHAIN}
 	for a in `ls` ; do
 		[ -n "$1" -a ! "$1" = "$a" ] && continue
 		PRI=$(grep -q PRIVATE $a && echo p||echo .)
 		PUB=$(grep -q PUBLIC $a && echo P||echo .)
-		PRO=$(getprofile < $KEYCHAIN/$a | cry -v |head -n1)
-		printf "$PRI$PUB\t$a\t$PRO\n"
+		PRO=$(cry_getprofile $a |head -n1)
+		printf "$PRI$PUB\t$a\t\t$PRO\n"
 	done
 )}
 
@@ -113,21 +130,20 @@ case "$1" in
 	exit 1
 	;;
 -s) # sign
-	openssl rsautl -sign -inkey $KEYCHAIN/$USER | base64
+	cry_sign "$2"
 	;;
 -u) # userdata
-	[ -n "$2" ] && USER=$2
-	[ -z "$KEYCHAIN/$USER" ] && die "Missing argument"
-	getprofile < $KEYCHAIN/$USER | $0 -v
+	while [ -n "$2" ]; do
+		cry_getprofile "$2"
+		shift
+	done
 	;;
 -U) # set userdata
-	[ -n "$2" ] && USER=$2
-	$0 -s $USER | setprofile $KEYCHAIN/$USER
+	[ -z "$2" ] && die "Missing argument"
+	cry_sign $USER | setprofile $KEYCHAIN/$USER
 	;;
 -v) # verify
-	[ -n "$2" ] && USER=$2
-	base64 -d | openssl rsautl -verify -inkey $KEYCHAIN/$USER \
-		-pubin 2>/dev/null ||exit 1
+	cry_verify "$2"
 	;;
 -x)
 	[ -n "$2" ] && USER=$2
@@ -191,13 +207,12 @@ Usage: cry [-opt] [...]
  -g [f] [sz]   generate priv/pub key pair f size 'sz'
  -i [file]     import priv/pub key from pem file
  -l            list all keys
- -L port       listen at specific port for conversation
- -C port       connect
  -p [name]     show public key
  -r [name]     remove key
+ -s name [f]   sign message or file
  -u [name]     get user profile
  -U [name]     set user profile (requires priv key)
- -v [name]     verify message/signature from user
+ -v [name]     verify message from user
  -w            who is there
  -x [name]     show hash of given user
 EOF
