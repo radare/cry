@@ -1,0 +1,205 @@
+#!/bin/sh
+# author: pancake
+# date: 2012-10-01
+
+# openssl ecparam -list_curves
+# NAME=secp256k1
+KEYSIZE=1024 # [32,128]-[4096]
+KEYCHAIN=~/.cry
+
+mkdir -p ${KEYCHAIN}
+
+KEY=$KEYCHAIN/${USER}
+PUBKEY=$KEY
+
+getprofile() {
+	awk 'BEGIN{A=0}{
+		if (/END PROFILE/) A=0
+		if (A) { print }
+		if (/BEGIN PROFILE/) A=1
+	}'
+}
+
+setprofile() {
+	awk 'BEGIN{A=1}{
+		if (/BEGIN PROFILE/) A=0
+		if (A) { print }
+		if (/END PROFILE/) A=1
+	}' < $1 > $1.tmp
+	mv $1.tmp $1
+	echo "-----BEGIN PROFILE-----" >>$1
+	cat >> $1
+	echo "-----END PROFILE-----" >>$1
+}
+
+keys_list() {(
+	cd ${KEYCHAIN}
+	for a in `ls` ; do
+		[ -n "$1" -a ! "$1" = "$a" ] && continue
+		PRI=$(grep -q PRIVATE $a && echo p||echo .)
+		PUB=$(grep -q PUBLIC $a && echo P||echo .)
+		PRO=$(getprofile < $KEYCHAIN/$a | cry -v |head -n1)
+		printf "$PRI$PUB\t$a\t$PRO\n"
+	done
+)}
+
+die() {
+	echo "$1"
+	exit 1
+}
+
+case "$1" in
+-g)
+	[ -n "$2" ] && USER=$2
+	[ -n "$3" ] && KEYSIZE=$3
+	U=$KEYCHAIN/$USER
+	[ -f "$U" ] && die "Already exists in keychain"
+	#openssl ecparam -genkey -name ${NAME} > $KEY
+	openssl genrsa $KEYSIZE 2>/dev/null > $U || die "genrsa failed"
+	exec openssl rsa -in $U -outform PEM -pubout >> $U
+	;;
+-p)
+	#openssl ec -pubout 2>/dev/null < $KEY
+	[ -n "$2" ] && USER=$2
+	U=$KEYCHAIN/$USER
+	[ ! -f "$U" ] && die "Cannot find key"
+	openssl rsa -in $U -outform PEM -pubout 2>/dev/null
+	F=`mktemp /tmp/.rsa.XXXXXX`
+	getprofile < $U > $F
+	if [ -s "$F" ]; then
+		echo "-----BEGIN PROFILE-----"
+		cat $F
+		echo "-----END PROFILE-----"
+	fi
+	rm -f $F
+	;;
+-i) # import private key
+	F="$2"
+	[ -z "$F" ] && die "Missing argument"
+	FN=$(basename $F)
+	[ -f "$KEYCHAIN/$FN" ] && die "Already in keychain"
+	if [ "$3" ]; then
+		cd $KEYCHAIN
+		cat > $F
+	else
+		if [ -n "`echo \"$F\"| grep http`" ]; then
+			cd $KEYCHAIN
+			wget $F
+		else
+			[ ! -f "$2" ] && die "Cannot open file"
+			cp $F $KEYCHAIN/$FN
+		fi
+	fi
+	# check priv key if found?
+	#openssl rsa -check -in $F
+	#echo $?
+	;;
+-w)
+	F=$(mktemp /tmp/rsa.XXXXXX)
+	base64 -d > $F
+	(
+	cd $KEYCHAIN
+	for a in * ; do
+		cat $F | openssl rsautl -out /dev/null \
+			-decrypt -inkey $a 2>/dev/null
+		if [ $? = 0 ]; then
+			echo $a
+			rm -f $F
+			exit 0
+		fi
+	done
+	)
+	rm -f $F
+	exit 1
+	;;
+-s) # sign
+	openssl rsautl -sign -inkey $KEYCHAIN/$USER | base64
+	;;
+-u) # userdata
+	[ -n "$2" ] && USER=$2
+	[ -z "$KEYCHAIN/$USER" ] && die "Missing argument"
+	getprofile < $KEYCHAIN/$USER | $0 -v
+	;;
+-U) # set userdata
+	[ -n "$2" ] && USER=$2
+	$0 -s $USER | setprofile $KEYCHAIN/$USER
+	;;
+-v) # verify
+	[ -n "$2" ] && USER=$2
+	base64 -d | openssl rsautl -verify -inkey $KEYCHAIN/$USER \
+		-pubin 2>/dev/null ||exit 1
+	;;
+-x)
+	[ -n "$2" ] && USER=$2
+	openssl rsautl -verify -inkey $KEYCHAIN/$USER -pubin \
+		2>/dev/null || exit 1
+	;;
+-r)
+	[ -z "$2" ] && die "Missing argument"
+	while [ -n "$2" ] ; do
+		rm -f "$KEYCHAIN/$2"
+		shift
+	done
+	;;
+-d)
+	F=$(mktemp /tmp/rsa.XXXXXX)
+	if [ "$2" = - ]; then
+		# read base64 from stdin
+		while : ; do
+			:> $F
+			while : ; do
+				read A
+				echo $A >> $F
+				echo $A | grep -qe "=$" && break
+			done
+			$0 -d < $F
+			break
+		done
+		rm -f $F
+		exit 0
+	fi
+	base64 -d > $F
+	(
+	cd $KEYCHAIN
+	for a in * ; do
+		openssl rsautl -decrypt -inkey $a < $F 2>/dev/null
+		if [ $? = 0 ]; then
+			echo $a >&2
+			rm -f $F
+			exit 0
+		fi
+	done
+	)
+	rm -f $F
+	exit 1
+	;;
+-e)
+	[ -n "$2" ] && USER=$2
+	TO=$KEYCHAIN/$USER
+	[ ! -f "$TO" ] && die "Unknown recipient"
+	cat $3 | openssl rsautl -encrypt -inkey $TO -pubin | base64
+	#openssl pkeyutl -encrypt -inkey $KEY -in /etc/services -out a
+	;;
+-l)
+	keys_list "$2"
+	;;
+*)
+	cat <<EOF
+Usage: cry [-opt] [...]
+ -e to [file]  encrypt text
+ -d [file]     decrypt text
+ -g [f] [sz]   generate priv/pub key pair f size 'sz'
+ -i [file]     import priv/pub key from pem file
+ -l            list all keys
+ -L port       listen at specific port for conversation
+ -C port       connect
+ -p [name]     show public key
+ -r [name]     remove key
+ -u [name]     get user profile
+ -U [name]     set user profile (requires priv key)
+ -v [name]     verify message/signature from user
+ -w            who is there
+ -x [name]     show hash of given user
+EOF
+	;;
+esac

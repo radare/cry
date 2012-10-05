@@ -1,0 +1,124 @@
+#!/usr/bin/env node
+
+var port = 9999
+var host = undefined
+var key = 'pancake'
+
+switch (process.argv.length) {
+case 4:
+	key = process.argv[2]
+	port = process.argv[3]
+	break;
+case 5:
+	key = process.argv[2]
+	host = process.argv[3]
+	port = process.argv[4]
+	break;
+default:
+	console.log ("client: cryo [pubkey] [host] [port]")
+	console.log ("server: cryo [pubkey] [port]")
+	process.exit (1);
+	break;
+}
+
+var spawn = require ("child_process").spawn
+var enc = (function (msg, cb) {
+	var p = spawn ('cry', ['-e', key]);
+	var body = "";
+	p.stdout.on ('data', function (data) {
+		body += data;
+	});
+	p.stdout.on ('close', function (code) {
+		cb (body);
+	});
+	p.stdin.write (msg)
+	p.stdin.on ("drain", function () {
+		p.stdin.end ();
+	});
+})
+
+var dec = (function (msg, cb) {
+	var user = "";
+	var body = "";
+	var p = spawn ('cry', ['-d']);
+	p.stderr.on ('data', function (data) {
+		if ((""+data).indexOf (' ') != -1)
+			console.log ("ERROR "+data);
+		else user += data;
+	});
+	p.stdout.on ('data', function (data) {
+		body += data;
+	});
+	p.stdout.on ('close', function (code) {
+		user = user.replace(/\n/g, "");
+		cb (key, body);
+	});
+	p.stdin.write (msg.replace (/\r/g,''));
+	p.stdin.on ("drain", function () {
+		p.stdin.end ();
+	});
+})
+
+process.stdin.resume();
+//process.stdin.setEncoding('ascii');
+
+var net = require('net');
+
+if (host) {
+	/* connect */
+//	var c = net.connect ( {'host': host, 'port': port}, function() {
+	var c = net.connect ( port, host, function() {
+//{'host': host, 'port': port}, function() {
+		c.setNoDelay ();
+		console.log('connected');
+		process.stdin.on ('data', function (data) {
+			enc (data, function (x) {
+				c.write (""+x);
+			});
+		});
+		var input = "";
+		c.on ('data', function (data) {
+			var str = ""+data;
+			input += str;
+			if (str.indexOf ('=') !=-1) {
+				dec (input, function (x, y) {
+					y = y.replace (/\n$/, '');
+					console.log ("<"+key+"> "+y)
+				});
+				input = "";
+			}
+		});
+		c.on('end', function() {
+			console.log('peer disconnected');
+		});
+	});
+} else {
+	/* listen */
+	var server = net.createServer (function (c) {
+		c.setNoDelay ();
+		console.log ("Client connected");
+		process.stdin.on ('data', function (data) {
+			enc (data, function (x) {
+				c.write (x)
+			});
+		})
+		var input = "";
+		c.on ('data', function (data) {
+			var str = ""+data;
+			input += str;
+			if (str.indexOf ('=') !=-1) {
+				dec (input, function (x,y) {
+					y = y.replace (/\n$/, '');
+					console.log ("<"+key+"> "+y)
+				});
+				input = ""
+			}
+		});
+		c.on('end', function() {
+			console.log('peer disconnected');
+		});
+	});
+	server.listen(port, function() {
+		console.log('listening on',port);
+	});
+}
