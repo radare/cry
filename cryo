@@ -2,7 +2,7 @@
 
 var port = 9999
 var host = undefined
-var key = 'pancake'
+var key = ""
 
 switch (process.argv.length) {
 case 4:
@@ -43,7 +43,7 @@ var dec = (function (msg, cb) {
 	var p = spawn ('cry', ['-d']);
 	p.stderr.on ('data', function (data) {
 		if ((""+data).indexOf (' ') != -1)
-			console.log ("ERROR "+data);
+	console.log ("ERROR "+data);
 		else user += data;
 	});
 	p.stdout.on ('data', function (data) {
@@ -59,66 +59,125 @@ var dec = (function (msg, cb) {
 	});
 })
 
-process.stdin.resume();
+//process.stdin.resume();
 //process.stdin.setEncoding('ascii');
 
+function completer(line) {
+	var completions = '/quit /query'.split (' ');
+	var hits = completions.filter(function(c) {
+			if (c.indexOf(line) == 0) {
+				return c;
+			}});
+	return [hits && hits.length ? hits : completions, line];
+}
+var rl = require ('readline').createInterface (
+		process.stdin, process.stdout, completer);
+
 var net = require('net');
+var offline = function () {console.log ("offline"); }
+var sendmsg = offline;
 
 if (host) {
 	/* connect */
-//	var c = net.connect ( {'host': host, 'port': port}, function() {
-	var c = net.connect ( port, host, function() {
-//{'host': host, 'port': port}, function() {
+	var c = net.connect (port, host, function () {
+		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log('connected');
+		sendmsg = function (data) {
+			enc (data, function (x) {
+				try {
+					c.write (x)
+				} catch (e) {
+					console.log ("cannot write")
+				}
+			});
+		}
+/*
 		process.stdin.on ('data', function (data) {
 			enc (data, function (x) {
 				c.write (""+x);
 			});
 		});
-		var input = "";
+*/
 		c.on ('data', function (data) {
-			var str = ""+data;
-			input += str;
-			if (str.indexOf ('=') !=-1) {
-				dec (input, function (x, y) {
-					y = y.replace (/\n$/, '');
-					console.log ("<"+key+"> "+y)
+			var input = (""+data).split ('=');
+			for (var i=0; i<input.length;i++) {
+				var str = input[i].trim () + "=";
+				if (str == "=") continue;
+				dec (str, function (x, y) {
+					console.log ("\r<"+key+"> "+y.trim ())
+					rl.prompt ();
 				});
-				input = "";
 			}
 		});
-		c.on('end', function() {
-			console.log('peer disconnected');
+		c.on ('end', function () {
+			console.log ('peer disconnected');
 		});
 	});
 } else {
 	/* listen */
 	var server = net.createServer (function (c) {
+		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log ("Client connected");
+		sendmsg = function (data) {
+			enc (data, function (x) {
+				try {
+					c.write (x)
+				} catch (e) {
+					console.log ("cannot write")
+				}
+			});
+		}
+/*
 		process.stdin.on ('data', function (data) {
 			enc (data, function (x) {
 				c.write (x)
 			});
 		})
+*/
 		var input = "";
 		c.on ('data', function (data) {
-			var str = ""+data;
-			input += str;
-			if (str.indexOf ('=') !=-1) {
-				dec (input, function (x,y) {
-					y = y.replace (/\n$/, '');
-					console.log ("<"+key+"> "+y)
+			var input = (""+data).split ('=');
+			for (var i=0; i<input.length;i++) {
+				var str = input[i].trim () + "=";
+				if (str == "=") continue;
+				dec (str, function (x, y) {
+					console.log ("\r<"+key+"> "+y.trim ())
+					rl.prompt ();
 				});
-				input = ""
 			}
 		});
 		c.on('end', function() {
 			console.log('peer disconnected');
 		});
 	});
-	server.listen(port, function() {
+	server.listen (port, function() {
 		console.log('listening on',port);
 	});
 }
+
+rl.setPrompt ('<'+key+'> ');
+rl.prompt ();
+
+rl.on ('line', function (line) {
+	var str = line.trim ();
+	if (str[0] == '/') {
+		var args = str.substring (1).split (/ /);
+		switch (args[0]) {
+		case 'query':
+			key = args[1];
+			rl.setPrompt ('<'+key+'> ');
+			break;
+		case 'q':
+		case 'quit':
+			console.log ("byebye");
+			process.exit (0);
+			break;
+		}
+	} else sendmsg (line.trim ());
+	rl.prompt ();
+}).on ('close', function () {
+	console.log ("^D");
+	process.exit (0);
+});
