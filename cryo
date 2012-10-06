@@ -100,9 +100,9 @@ if (host) {
 		});
 */
 		c.on ('data', function (data) {
-			var input = (""+data).split ('=');
+			var input = (""+data).replace (/==/,'_=').split ('=');
 			for (var i=0; i<input.length;i++) {
-				var str = input[i].trim () + "=";
+				var str = input[i].trim ().replace(/_/,'=') + "=";
 				if (str == "=") continue;
 				dec (str, function (x, y) {
 					console.log ("\r<"+key+"> "+y.trim ())
@@ -138,9 +138,9 @@ if (host) {
 */
 		var input = "";
 		c.on ('data', function (data) {
-			var input = (""+data).split ('=');
+			var input = (""+data).replace (/==/,'_=').split ('=');
 			for (var i=0; i<input.length;i++) {
-				var str = input[i].trim () + "=";
+				var str = input[i].trim ().replace(/_/,'=') + "=";
 				if (str == "=") continue;
 				dec (str, function (x, y) {
 					console.log ("\r<"+key+"> "+y.trim ())
