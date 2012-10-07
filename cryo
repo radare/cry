@@ -87,9 +87,11 @@ function set_peer (n) {
 	var i = 0;
 	for (var p in peers) {
 		if (n == i++) {
-			peer = peers[p];
-			key = peer.key;
-			return true;
+			if ((peer = peers[p])) {
+				key = peer.key;
+				return true;
+			}
+			return false;
 		}
 	}
 	return false;
@@ -99,7 +101,7 @@ function list_peers () {
 	var i = 0;
 	for (var x in peers) {
 		var p = peers[x];
-		console.log (peer == p? '*': ' ', i, p);
+		console.log (peer == p? '*': ' ', i, p.host+":"+p.port, p.key);
 		i++;
 	}
 }
@@ -120,12 +122,12 @@ function status(x) {
 }
 
 function cryo_connect (host, port) {
-	status ("connecting")
+	status ("connecting");
+	//console.log ("Connecting...");
 	var c = net.connect (port, host, function () {
 		status ("connected")
 		var uuid = UUID++;
 		peers[uuid] = c;
-		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log('connected');
 		sendmsg = function (data) {
@@ -150,13 +152,15 @@ function cryo_connect (host, port) {
 		});
 		c.on ('end', function () {
 			console.log ('peer disconnected');
-			delete peers[uuid];
-			if (peer == c) {
+			/* if (peer == c) {
 				if (!set_peer (0))
 					sendmsg = offline;
-			}
+			} */
+			sendmsg = offline;
+			delete peers[uuid];
 		});
 	});
+	c.on ('error', offline);
 }
 
 function cryo_listen (port) {
@@ -207,8 +211,20 @@ function cryo_listen (port) {
 }
 
 /* main */
-if (host) cryo_connect (host, port);
-else cryo_listen (port);
+if (host) {
+	cryo_connect (host, port);
+	// XXX
+	if (reconnect) {
+		setInterval (function (x) {
+			if (sendmsg == offline) {
+				if (status () == "connecting")
+					return;
+				console.log ("reconnecting...");
+				cryo_connect (host, port);
+			}
+		} , reconnect_every*1000);
+	}
+} else cryo_listen (port);
 rl.set_prompt = function (x) {
 	if (x) rl.setPrompt ('\x1b[32m<'+x+'> \x1b[0m', x.length+3);
 }
@@ -260,14 +276,3 @@ rl.on ('line', function (line) {
 	process.exit (0);
 });
 
-// XXX
-if (reconnect) {
-	setInterval (function (x) {
-		if (sendmsg == offline) {
-			if (status () == "connecting")
-				return;
-			console.log ("reconnecting...");
-			cryo_connect ();
-		}
-	} , reconnect_every*1000);
-}
