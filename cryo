@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 
+var net = require ('net');
+var spawn = require ("child_process").spawn
+var rl = require ('readline').createInterface (
+		process.stdin, process.stdout, completer);
+var UUID = 0;
 var port = 9999
 var host = undefined
 var key = ""
@@ -21,7 +26,6 @@ default:
 	break;
 }
 
-var spawn = require ("child_process").spawn
 var enc = (function (msg, cb) {
 	var p = spawn ('cry', ['-e', key]);
 	var body = "";
@@ -38,19 +42,17 @@ var enc = (function (msg, cb) {
 })
 
 var dec = (function (msg, cb) {
-	var user = "";
 	var body = "";
 	var p = spawn ('cry', ['-d']);
 	p.stderr.on ('data', function (data) {
-		if ((""+data).indexOf (' ') != -1)
-	console.log ("ERROR "+data);
-		else user += data;
+		data = (""+data).trim ()
+		if (data.indexOf (' ') != -1)
+			console.log ("ERROR "+data);
 	});
 	p.stdout.on ('data', function (data) {
 		body += data;
 	});
 	p.stdout.on ('close', function (code) {
-		user = user.replace(/\n/g, "");
 		cb (key, body);
 	});
 	p.stdin.write (msg.replace (/\r/g,''));
@@ -59,27 +61,56 @@ var dec = (function (msg, cb) {
 	});
 })
 
-//process.stdin.resume();
-//process.stdin.setEncoding('ascii');
-
-function completer(line) {
-	var completions = '/quit /query'.split (' ');
+function completer (line) {
+	var completions = '/connect /disconnect /exit /key /list /peer'.split (' ');
 	var hits = completions.filter(function(c) {
 			if (c.indexOf(line) == 0) {
 				return c;
 			}});
 	return [hits && hits.length ? hits : completions, line];
 }
-var rl = require ('readline').createInterface (
-		process.stdin, process.stdout, completer);
 
-var net = require('net');
+var peers = [];
+var peer = undefined
+
+function set_key (k) {
+	if (peer) {
+		rl.set_prompt (peer.key = k)
+	}
+}
+
+function set_peer (n) {
+	var i = 0;
+	for (var p in peers) {
+		if (n == i++) {
+			peer = peers[p];
+			key = peer.key;
+			return true;
+		}
+	}
+	return false;
+}
+
+function list_peers () {
+	var i = 0;
+	for (var x in peers) {
+		var p = peers[x];
+		console.log (peer == p? '*': ' ', i, p);
+		i++;
+	}
+}
+
 var offline = function () {console.log ("offline"); }
 var sendmsg = offline;
 
-if (host) {
-	/* connect */
+function cryo_disconnect (host, port) {
+	peer.destroy ();
+}
+
+function cryo_connect (host, port) {
 	var c = net.connect (port, host, function () {
+		var uuid = UUID++;
+		peers[uuid] = c;
 		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log('connected');
@@ -92,13 +123,6 @@ if (host) {
 				}
 			});
 		}
-/*
-		process.stdin.on ('data', function (data) {
-			enc (data, function (x) {
-				c.write (""+x);
-			});
-		});
-*/
 		c.on ('data', function (data) {
 			var input = (""+data).replace (/==/,'_=').split ('=');
 			for (var i=0; i<input.length;i++) {
@@ -112,14 +136,32 @@ if (host) {
 		});
 		c.on ('end', function () {
 			console.log ('peer disconnected');
+			delete peers[uuid];
+			if (peer == c) {
+				if (!set_peer (0))
+					sendmsg = offline;
+			}
 		});
 	});
+}
+
+if (host) {
+	cryo_connect (host, port);
 } else {
 	/* listen */
 	var server = net.createServer (function (c) {
+		var uuid = UUID++;
 		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log ("Client connected");
+console.log ("UUID", uuid)
+		var p = peer = peers[uuid] = {
+			'host' : c.remoteAddress,
+			'port' : c.remotePort,
+			'uuid' : uuid,
+			'key' : key
+		}
+		rl.set_prompt (key)
 		sendmsg = function (data) {
 			enc (data, function (x) {
 				try {
@@ -129,13 +171,6 @@ if (host) {
 				}
 			});
 		}
-/*
-		process.stdin.on ('data', function (data) {
-			enc (data, function (x) {
-				c.write (x)
-			});
-		})
-*/
 		var input = "";
 		c.on ('data', function (data) {
 			var input = (""+data).replace (/==/,'_=').split ('=');
@@ -148,16 +183,20 @@ if (host) {
 				});
 			}
 		});
-		c.on('end', function() {
-			console.log('peer disconnected');
+		c.on ('end', function () {
+			console.log ('peer disconnected');
+			peers[uuid] = undefined
 		});
 	});
 	server.listen (port, function() {
-		console.log('listening on',port);
+		console.log ('listening on', port);
 	});
 }
 
-rl.setPrompt ('<'+key+'> ');
+rl.set_prompt = function (x) {
+	if (x) rl.setPrompt ('\x1b[32m<'+x+'> \x1b[0m', x.length+3);
+}
+rl.set_prompt (key)
 rl.prompt ();
 
 rl.on ('line', function (line) {
@@ -165,17 +204,40 @@ rl.on ('line', function (line) {
 	if (str[0] == '/') {
 		var args = str.substring (1).split (/ /);
 		switch (args[0]) {
-		case 'query':
-			key = args[1];
-			rl.setPrompt ('<'+key+'> ');
+		case 'connect':
+			if (args[1]) host = args[1]
+			if (args[2]) port = args[2]
+			cryo_disconnect ();
+			cryo_connect (host, port)
 			break;
-		case 'q':
-		case 'quit':
+		case 'disconnect':
+			cryo_disconnect ();
+			break;
+		case 'key':
+			if (args[1]) {
+				set_key (args[1]);
+				if (key) rl.set_prompt (key = args[1]);
+			} else console.log (key);
+			break;
+		case 'peer':
+			if (args[1]) {
+				set_peer (args[1]);
+			} else {
+				if (peer) console.log (peer.uuid);
+			}
+			break;
+		case 'list':
+			list_peers ();
+			break;
+		case 'exit':
 			console.log ("byebye");
 			process.exit (0);
 			break;
 		}
-	} else sendmsg (line.trim ());
+	} else {
+		var str = line.trim ();
+		if (str.length>0) sendmsg (str);
+	}
 	rl.prompt ();
 }).on ('close', function () {
 	console.log ("^D");
