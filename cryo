@@ -8,6 +8,10 @@ var UUID = 0;
 var port = 9999
 var host = undefined
 var key = ""
+var cry = __dirname + "/cry"
+var forward = false; // not yet implemented
+var reconnect = true;
+var reconnect_every = 5;
 
 switch (process.argv.length) {
 case 4:
@@ -27,7 +31,7 @@ default:
 }
 
 var enc = (function (msg, cb) {
-	var p = spawn ('cry', ['-e', key]);
+	var p = spawn (cry, ['-e', key]);
 	var body = "";
 	p.stdout.on ('data', function (data) {
 		body += data;
@@ -43,7 +47,7 @@ var enc = (function (msg, cb) {
 
 var dec = (function (msg, cb) {
 	var body = "";
-	var p = spawn ('cry', ['-d']);
+	var p = spawn (cry, ['-d']);
 	p.stderr.on ('data', function (data) {
 		data = (""+data).trim ()
 		if (data.indexOf (' ') != -1)
@@ -100,15 +104,25 @@ function list_peers () {
 	}
 }
 
-var offline = function () {console.log ("offline"); }
+var offline = function () {
+	status ("offline");
+	console.log ("offline");
+}
 var sendmsg = offline;
 
 function cryo_disconnect (host, port) {
 	peer.destroy ();
 }
 
+var _status = undefined;
+function status(x) {
+	return x? _status = x: _status;
+}
+
 function cryo_connect (host, port) {
+	status ("connecting")
 	var c = net.connect (port, host, function () {
+		status ("connected")
 		var uuid = UUID++;
 		peers[uuid] = c;
 		c.on ('error', offline);
@@ -145,27 +159,26 @@ function cryo_connect (host, port) {
 	});
 }
 
-if (host) {
-	cryo_connect (host, port);
-} else {
+function cryo_listen (port) {
 	/* listen */
 	var server = net.createServer (function (c) {
 		var uuid = UUID++;
 		c.on ('error', offline);
 		c.setNoDelay ();
 		console.log ("Client connected");
-console.log ("UUID", uuid)
 		var p = peer = peers[uuid] = {
 			'host' : c.remoteAddress,
 			'port' : c.remotePort,
 			'uuid' : uuid,
-			'key' : key
+			'key' : key,
+			'socket': c
 		}
 		rl.set_prompt (key)
 		sendmsg = function (data) {
 			enc (data, function (x) {
 				try {
-					c.write (x)
+					if (peer)
+						peer.socket.write (x)
 				} catch (e) {
 					console.log ("cannot write")
 				}
@@ -193,6 +206,9 @@ console.log ("UUID", uuid)
 	});
 }
 
+/* main */
+if (host) cryo_connect (host, port);
+else cryo_listen (port);
 rl.set_prompt = function (x) {
 	if (x) rl.setPrompt ('\x1b[32m<'+x+'> \x1b[0m', x.length+3);
 }
@@ -243,3 +259,15 @@ rl.on ('line', function (line) {
 	console.log ("^D");
 	process.exit (0);
 });
+
+// XXX
+if (reconnect) {
+	setInterval (function (x) {
+		if (sendmsg == offline) {
+			if (status () == "connecting")
+				return;
+			console.log ("reconnecting...");
+			cryo_connect ();
+		}
+	} , reconnect_every*1000);
+}
