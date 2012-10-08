@@ -95,7 +95,7 @@ case "$1" in
 	[ -z "$F" ] && die "Missing argument"
 	FN=$(basename $F)
 	[ -f "$KEYCHAIN/$FN" ] && die "Already in keychain"
-	if [ "$3" ]; then
+	if [ -n "$3" ]; then
 		cd $KEYCHAIN
 		cat > $F
 	else

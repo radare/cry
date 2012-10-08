@@ -2,6 +2,7 @@
 
 var net = require ('net');
 var spawn = require ("child_process").spawn
+var exec = require ("child_process").exec
 var rl = require ('readline').createInterface (
 		process.stdin, process.stdout, completer);
 var UUID = 0;
@@ -25,7 +26,6 @@ var p = spawn ("sh", [ "-c", "cry -l| grep ^p|head -n1|awk '{print $2}'" ])
 p.stdout.on ('data', function (data) {
 	iam = (""+data).trim ();
 });
-p.stdout.on ('error', function () { });
 /* --- */
 
 switch (process.argv.length) {
@@ -43,6 +43,22 @@ default:
 	console.log ("server: cryo [pubkey] [port]")
 	process.exit (1);
 	break;
+}
+
+var cryo_import = function (name, key) {
+	var p = spawn (cry, ['-i', name, '-']);
+	var body = "";
+	p.stdout.on ('data', function (data) {
+		body += data;
+	});
+	p.stdout.on ('close', function (code) {
+		print (body)
+// XXX: todo use proper foo bar
+	});
+	p.stdin.write (key)
+	p.stdin.on ("drain", function () {
+		p.stdin.end ();
+	});
 }
 
 var enc = (function (msg, cb) {
@@ -81,7 +97,7 @@ var dec = (function (msg, cb) {
 })
 
 function completer (line) {
-	var completions = '/connect /disconnect /exit /key /list /peer'.split (' ');
+	var completions = '/help /import /connect /disconnect /exit /key /list /peer'.split (' ');
 	var hits = completions.filter(function(c) {
 			if (c.indexOf(line) == 0) {
 				return c;
@@ -103,6 +119,7 @@ function set_peer (n) {
 		if (n == i++) {
 			if ((peer = peers[p])) {
 				key = peer.key;
+				rl.set_prompt (key)
 				return true;
 			}
 			return false;
@@ -115,7 +132,13 @@ function list_peers () {
 	var i = 0;
 	for (var x in peers) {
 		var p = peers[x];
-		if (p) console.log (peer == p? '*': ' ', i, p.host+":"+p.port, p.key);
+		if (p) {
+			var pn = "";
+			if (p.pub_name)
+				pn = "@("+p.pub_name+")";
+			console.log (peer == p? '*': ' ',
+				i, p.host+":"+p.port, p.key, pn);
+		}
 		i++;
 	}
 }
@@ -125,11 +148,33 @@ var offline = function () {
 }
 var sendmsg = offline;
 
+function peersend (data, type) {
+	if (type) {
+		try {
+			if (peer)
+				peer.socket.write (type+"\n"+data)
+		} catch (e) {
+			print ("cannot write 0", e)
+		}
+		return;
+	}
+	type = "msg";
+	enc (data, function (x) {
+		try {
+			if (peer)
+				peer.socket.write (type+"\n"+x)
+		} catch (e) {
+			print ("cannot write 1")
+		}
+	});
+}
 function cryo_disconnect (host, port) {
-	peer.destroy ();
+	if (peer)
+		peer.socket.destroy ();
 }
 
 var _status = undefined;
+
 function status(x) {
 	if (x) print (x)
 	return x? _status = x: _status;
@@ -147,6 +192,38 @@ function print (x) {
 	rl.prompt (true);
 }
 
+function cryo_decode_msg (uuid, data) {
+	var noff = data.indexOf ('\n');
+	if (noff != -1) {
+		header = data.substring (0, noff).split (' ')
+		data = data.substring (noff+1)
+	} else header = [];
+
+	var input = (""+data).replace (/==/,'_=').split ('=');
+	for (var i=0; i<input.length;i++) {
+		var str = input[i].trim ().replace(/_/,'=') + "=";
+		if (str == "=") continue;
+		switch (header[0]) {
+		case 'pub':
+			console.log ("Received public key from "+header[1])
+			console.log (data)
+			console.log ("Type /import to accept it")
+			peer.pub_name = header[1];
+			peer.pub = data
+			rl.prompt (true);
+			break;
+		case 'msg':
+			dec (str, function (x, y) {
+				print ("<"+key+":"+uuid+"> "+y.trim ())
+			});
+			break;
+		default:
+			print ("invalid packet");
+			break;
+		}
+	}
+}
+
 function cryo_connect (host, port) {
 	status ("connecting to "+host+":"+port);
 	var c = net.connect (port, host, function () {
@@ -158,26 +235,13 @@ function cryo_connect (host, port) {
 			'key' : key,
 			'socket': c
 		};
+		if (!peer) peer = p;
 		c.setNoDelay ();
 		print ('connected');
-		sendmsg = function (data) {
-			enc (data, function (x) {
-				try {
-					c.write (x)
-				} catch (e) {
-					print ("cannot write")
-				}
-			});
-		}
+		sendmsg = peersend;
+
 		c.on ('data', function (data) {
-			var input = (""+data).replace (/==/,'_=').split ('=');
-			for (var i=0; i<input.length;i++) {
-				var str = input[i].trim ().replace(/_/,'=') + "=";
-				if (str == "=") continue;
-				dec (str, function (x, y) {
-					print ("<"+key+":"+uuid+"> "+y.trim ())
-				});
-			}
+			cryo_decode_msg (uuid, ""+data)
 		});
 		c.on ('end', function () {
 			print ('peer disconnected');
@@ -190,6 +254,19 @@ function cryo_connect (host, port) {
 		});
 	});
 	c.on ('error', offline);
+}
+
+function cryo_pub (k) {
+	var p = spawn (cry, ['-p', k]);
+	var pubkey = "";
+	p.stdout.on ('data', function (data) {
+		pubkey += (""+data)
+	});
+	p.stdout.on ('close', function (data) {
+		if (pubkey.length>0) {
+			sendmsg (pubkey, "pub "+k);
+		} else print ("Cannot find pubkey");
+	});
 }
 
 function cryo_listen (port) {
@@ -208,26 +285,10 @@ function cryo_listen (port) {
 		}
 		if (!peer) peer = p;
 		rl.set_prompt (iam)
-		sendmsg = function (data) {
-			enc (data, function (x) {
-				try {
-					if (peer)
-						peer.socket.write (x)
-				} catch (e) {
-					print ("cannot write")
-				}
-			});
-		}
+		sendmsg = peersend
 		var input = "";
 		c.on ('data', function (data) {
-			var input = (""+data).replace (/==/,'_=').split ('=');
-			for (var i=0; i<input.length;i++) {
-				var str = input[i].trim ().replace(/_/,'=') + "=";
-				if (str == "=") continue;
-				dec (str, function (x, y) {
-					print ("<"+key+":"+uuid+"> "+y.trim ())
-				});
-			}
+			cryo_decode_msg (uuid, ""+data)
 		});
 		c.on ('end', function () {
 			print ('peer disconnected');
@@ -242,13 +303,11 @@ function cryo_listen (port) {
 /* main */
 if (host) {
 	cryo_connect (host, port);
-	// XXX
 	if (reconnect) {
 		setInterval (function (x) {
 			if (sendmsg == offline) {
 				if (status () == "connecting")
 					return;
-				print ("reconnecting...");
 				cryo_connect (host, port);
 			}
 		} , reconnect_every*1000);
@@ -257,6 +316,13 @@ if (host) {
 
 rl.on ('line', function (line) {
 	var str = line.trim ();
+	if (str[0] == '!') {
+		str = str.substring (1);
+		var p = spawn ("sh", ["-c", str])
+		if (p) p.stdout.on ('data', function (data) {
+			print (str+"\n"+(""+data).trim())
+		});
+	} else
 	if (str[0] == '/') {
 		var args = str.substring (1).split (/ /);
 		switch (args[0]) {
@@ -283,12 +349,37 @@ rl.on ('line', function (line) {
 				if (peer) print (peer.uuid);
 			}
 			break;
+		case 'help':
+			console.log (
+" /connect [host] [port]\n"+
+" /disconnect       close connection to current peer\n"+
+" /key [pubkey]     set key to encrypt\n"+
+" /peer [id]        select a peer\n"+
+" /pub [key]        send public key to peer\n"+
+" /import           import key published by peer\n"+
+" /list             list all peers\n"+
+" /exit             quit the program"
+			);
+			break;
+		case 'pub':
+			if (args[1]) cryo_pub (args[1]);
+			else console.log ("Missing argument");
+			break;
 		case 'list':
 			list_peers ();
 			break;
 		case 'exit':
 			console.log ("byebye");
 			process.exit (0);
+			break;
+		case 'import':
+			if (peer && peer.pub_name && peer.pub) {
+				cryo_import (peer.pub_name, peer.pub);
+				peer.pub_name = peer.pub = undefined;
+			} else print ("Nothing to import");
+			break;
+		default:
+			console.log ("Invalid command.");
 			break;
 		}
 	} else {
@@ -300,4 +391,3 @@ rl.on ('line', function (line) {
 	console.log ("^D");
 	process.exit (0);
 });
-
