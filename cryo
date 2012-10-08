@@ -40,7 +40,6 @@ default:
 	break;
 }
 
-console.log (key)
 rl.set_prompt = function (x) {
 	var id = peer? peer.uuid: -1;
 	if (x) rl.setPrompt ('\x1b[32m<'+x+':'+id+'> \x1b[0m', (x+id).length+4);
@@ -67,16 +66,19 @@ var enc = (function (msg, cb) {
 })
 
 var dec = (function (msg, cb) {
+	var oclosed = false;
+	var eclosed = false;
 	var body = "";
-	var rkey = ""
+	var nkey = ""
 	var p = spawn (cry, ['-d']);
 	p.stderr.on ('data', function (data) {
 		nkey = (""+data).trim ()
 		if (nkey.indexOf (' ') != -1)
 			console.error ("ERROR "+nkey);
 	});
+	p.stderr.on ('close', function (code) { eclosed = true; if (oclosed) cb (nkey, body); });
 	p.stdout.on ('data', function (data) { body += data; });
-	p.stdout.on ('close', function (code) { cb (nkey, body); });
+	p.stdout.on ('close', function (code) { oclosed = true; if (eclosed) cb (nkey, body); });
 	p.stdin.on ("drain", function () { p.stdin.end (); });
 	p.stdin.write (msg.replace (/\r/g,''));
 })
@@ -84,17 +86,12 @@ var dec = (function (msg, cb) {
 var peers = [];
 var peer = undefined
 
-function set_key (k) {
-	if (peer) peer.key = k;
-}
-
 function set_peer (n) {
 	var i = 0;
 	for (var p in peers) {
 		if (n == i++) {
-			if ((peer = peers[p])) {
+			if ((peer = peers[p]))
 				return true;
-			}
 			return false;
 		}
 	}
@@ -121,22 +118,14 @@ var sendmsg = offline;
 
 function peersend (data, type) {
 	if (type) {
-		try {
-			if (peer)
-				peer.sock.write (type+"\n"+data)
-		} catch (e) {
-			print ("cannot write 0", e)
-		}
+		try { if (peer) peer.sock.write (type+"\n"+data)
+		} catch (e) { print ("cannot write 0", e) }
 		return;
 	}
 	type = "msg";
 	enc (data, function (x) {
-		try {
-			if (peer)
-				peer.sock.write (type+"\n"+x)
-		} catch (e) {
-			print ("cannot write 1")
-		}
+		try { if (peer) peer.sock.write (type+"\n"+x)
+		} catch (e) { print ("cannot write 1") }
 	});
 }
 function cryo_disconnect (host, port) {
@@ -194,7 +183,8 @@ function cryo_decode_msg (uuid, data) {
 			break;
 		case 'msg':
 			dec (str, function (x, y) {
-				print ("<"+x+":"+uuid+"> "+y.trim ())
+				rl.set_prompt (x);
+				print ("<"+key+":"+uuid+"> "+y.trim ())
 			});
 			break;
 		default:
@@ -278,7 +268,6 @@ if (host) {
 		} , reconnect_every*1000);
 	}
 } else cryo_listen (port);
-rl.set_prompt (iam)
 
 var commands = {
 	'help': { callback: function () {
@@ -299,7 +288,7 @@ var commands = {
 		}, help: "\tunlink current peer" },
 	'key': { callback: function (args) {
 			if (args[1]) {
-				set_key (key = args[1]);
+				if (peer) peer.key = key = args[1];
 			} else print (key);
 		}, help: "[k]\tset pub key for current peer" },
 	'keys': { callback: function (args) {

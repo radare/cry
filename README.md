@@ -15,7 +15,5 @@ TODO
 TCP: cant handle multi user chats
 UDP: support multiuser chats and mobile networking
 P2P: use irc as transport?
-use readline
-show timestamp in messages
 
 --pancake
