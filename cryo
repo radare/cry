@@ -115,7 +115,7 @@ function list_peers () {
 	var i = 0;
 	for (var x in peers) {
 		var p = peers[x];
-		console.log (peer == p? '*': ' ', i, p.host+":"+p.port, p.key);
+		if (p) console.log (peer == p? '*': ' ', i, p.host+":"+p.port, p.key);
 		i++;
 	}
 }
@@ -132,7 +132,7 @@ function cryo_disconnect (host, port) {
 
 var _status = undefined;
 function status(x) {
-	if (x) p(x)
+	if (x) print (x)
 	return x? _status = x: _status;
 }
 function print (x) {
@@ -147,6 +147,8 @@ function cryo_connect (host, port) {
 		var p = peers[uuid] = {
 			'host':host,
 			'port':port,
+			'uuid' : uuid,
+			'key' : key,
 			'socket': c
 		};
 		c.setNoDelay ();
