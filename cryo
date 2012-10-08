@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-# networked cry node -- pancake@nopcode.org
+/* networked cry node -- pancake@nopcode.org */
 
 var net = require ('net');
 var exec = require ("child_process").exec
