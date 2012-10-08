@@ -7,11 +7,26 @@ var rl = require ('readline').createInterface (
 var UUID = 0;
 var port = 9999
 var host = undefined
+var iam = process.env ["USER"] || undefined
 var key = ""
 var cry = __dirname + "/cry"
 var forward = false; // not yet implemented
 var reconnect = true;
 var reconnect_every = 5;
+
+rl.set_prompt = function (x) {
+	var id = peer? peer.uuid: -1;
+	if (x) rl.setPrompt ('\x1b[32m<'+x+':'+id+'> \x1b[0m', (x+id).length+4);
+}
+rl.set_prompt (iam)
+rl.prompt ();
+/* --- */
+var p = spawn ("sh", [ "-c", "cry -l| grep ^p|head -n1|awk '{print $2}'" ])
+p.stdout.on ('data', function (data) {
+	iam = (""+data).trim ();
+});
+p.stdout.on ('error', function () { });
+/* --- */
 
 switch (process.argv.length) {
 case 4:
@@ -78,9 +93,8 @@ var peers = [];
 var peer = undefined
 
 function set_key (k) {
-	if (peer) {
-		rl.set_prompt (peer.key = k)
-	}
+	if (peer)
+		peer.key = k;
 }
 
 function set_peer (n) {
@@ -118,24 +132,31 @@ function cryo_disconnect (host, port) {
 
 var _status = undefined;
 function status(x) {
+	if (x) p(x)
 	return x? _status = x: _status;
+}
+function print (x) {
+	console.log ("\x1b0K\r"+x)
+	rl.prompt (true);
 }
 
 function cryo_connect (host, port) {
-	status ("connecting");
-	//console.log ("Connecting...");
+	status ("connecting to "+host+":"+port);
 	var c = net.connect (port, host, function () {
-		status ("connected")
 		var uuid = UUID++;
-		peers[uuid] = c;
+		var p = peers[uuid] = {
+			'host':host,
+			'port':port,
+			'socket': c
+		};
 		c.setNoDelay ();
-		console.log('connected');
+		print ('connected');
 		sendmsg = function (data) {
 			enc (data, function (x) {
 				try {
 					c.write (x)
 				} catch (e) {
-					console.log ("cannot write")
+					print ("cannot write")
 				}
 			});
 		}
@@ -145,13 +166,12 @@ function cryo_connect (host, port) {
 				var str = input[i].trim ().replace(/_/,'=') + "=";
 				if (str == "=") continue;
 				dec (str, function (x, y) {
-					console.log ("\r<"+key+"> "+y.trim ())
-					rl.prompt ();
+					print ("<"+key+":"+uuid+"> "+y.trim ())
 				});
 			}
 		});
 		c.on ('end', function () {
-			console.log ('peer disconnected');
+			print ('peer disconnected');
 			/* if (peer == c) {
 				if (!set_peer (0))
 					sendmsg = offline;
@@ -169,22 +189,23 @@ function cryo_listen (port) {
 		var uuid = UUID++;
 		c.on ('error', offline);
 		c.setNoDelay ();
-		console.log ("Client connected");
-		var p = peer = peers[uuid] = {
+		print ("peer "+uuid+" connected");
+		var p = peers[uuid] = {
 			'host' : c.remoteAddress,
 			'port' : c.remotePort,
 			'uuid' : uuid,
 			'key' : key,
 			'socket': c
 		}
-		rl.set_prompt (key)
+		if (!peer) peer = p;
+		rl.set_prompt (iam)
 		sendmsg = function (data) {
 			enc (data, function (x) {
 				try {
 					if (peer)
 						peer.socket.write (x)
 				} catch (e) {
-					console.log ("cannot write")
+					print ("cannot write")
 				}
 			});
 		}
@@ -195,18 +216,17 @@ function cryo_listen (port) {
 				var str = input[i].trim ().replace(/_/,'=') + "=";
 				if (str == "=") continue;
 				dec (str, function (x, y) {
-					console.log ("\r<"+key+"> "+y.trim ())
-					rl.prompt ();
+					print ("<"+key+":"+uuid+"> "+y.trim ())
 				});
 			}
 		});
 		c.on ('end', function () {
-			console.log ('peer disconnected');
+			print ('peer disconnected');
 			peers[uuid] = undefined
 		});
 	});
 	server.listen (port, function() {
-		console.log ('listening on', port);
+		print ('listening on '+ port);
 	});
 }
 
@@ -219,17 +239,12 @@ if (host) {
 			if (sendmsg == offline) {
 				if (status () == "connecting")
 					return;
-				console.log ("reconnecting...");
+				print ("reconnecting...");
 				cryo_connect (host, port);
 			}
 		} , reconnect_every*1000);
 	}
 } else cryo_listen (port);
-rl.set_prompt = function (x) {
-	if (x) rl.setPrompt ('\x1b[32m<'+x+'> \x1b[0m', x.length+3);
-}
-rl.set_prompt (key)
-rl.prompt ();
 
 rl.on ('line', function (line) {
 	var str = line.trim ();
@@ -249,13 +264,14 @@ rl.on ('line', function (line) {
 			if (args[1]) {
 				set_key (args[1]);
 				if (key) rl.set_prompt (key = args[1]);
-			} else console.log (key);
+			} else print (key);
 			break;
 		case 'peer':
 			if (args[1]) {
-				set_peer (args[1]);
+				if (!set_peer (args[1]))
+					print ("invalid peer id")
 			} else {
-				if (peer) console.log (peer.uuid);
+				if (peer) print (peer.uuid);
 			}
 			break;
 		case 'list':
