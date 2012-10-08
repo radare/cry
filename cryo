@@ -171,6 +171,19 @@ function cryo_decode_msg (uuid, data) {
 		var str = input[i].trim ().replace(/_/,'=') + "=";
 		if (str == "=") continue;
 		switch (header[0]) {
+		case 'pong':
+			dec (str, function (x, y) {
+				print ("PONG <"+x+":"+uuid+"> "+y.trim ())
+			});
+			break;
+		case 'ping':
+			dec (str, function (x, y) {
+				enc (y.trim(), function (x2) {
+					sendmsg (x2, "pong")
+					print ("PONG <"+x+":"+uuid+"> "+y.trim ())
+				});
+			});
+			break;
 		case 'pub':
 			console.log ("Received public key from "+header[1])
 			console.log (data)
@@ -292,6 +305,13 @@ var commands = {
 	'keys': { callback: function (args) {
 			cryo_cmd ("!cry -l")
 		}, help: "\talias for !cry -l" },
+	'ping': { callback: function (args) {
+			var uuid = ""+Math.floor (Math.random ()*999999)
+			console.log ("PING "+uuid)
+			enc (uuid, function (x) {
+				sendmsg (x, "ping")
+			});
+		}, help: "\tsend ping. expect pong" },
 	'peer': { callback: function (args) {
 			if (args[1]) {
 				if (!set_peer (args[1]))
