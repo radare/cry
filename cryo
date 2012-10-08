@@ -188,7 +188,7 @@ function cryo_decode_msg (uuid, data) {
 			});
 			break;
 		case 'pub':
-			console.log ("Received public key from "+header[1])
+			print ("Received public key from "+header[1])
 			console.log (data)
 			console.log ("Type /import to accept it")
 			peer.pub_name = header[1];
