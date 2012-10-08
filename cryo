@@ -342,7 +342,6 @@ function cryo_cmd (str) {
 		else console.error ("Invalid command.");
 		break;
 	default:
-		var str = line.trim ();
 		if (str.length>0) sendmsg (str);
 	}
 }
