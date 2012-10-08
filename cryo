@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* networked cry node -- pancake@nopcode.org */
+/* networked cry node -- 2012 -- pancake@nopcode.org */
 
 var net = require ('net');
 var exec = require ("child_process").exec
@@ -99,8 +99,10 @@ function set_peer (n) {
 	var i = 0;
 	for (var p in peers) {
 		if (n == i++) {
-			if ((peer = peers[p]))
+			if ((peer = peers[p])) {
+				key = peer.key
 				return true;
+			}
 			return false;
 		}
 	}
@@ -154,7 +156,7 @@ function status(x) {
 function print (x) {
 	var d = new Date ();
 	function atoi (x) { if (x<10) return "0"+x; return x; }
-	now = (x.indexOf ('<') != -1)?
+	now = ((""+x).indexOf ('<') != -1)?
 		atoi (d.getHours ()) + ":" + atoi (d.getMinutes ())+" ": "";
 	console.log ("\r\x1b[0K"+now+x)
 	rl.prompt (true);
