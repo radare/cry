@@ -280,7 +280,7 @@ if (host) {
 					return;
 				cryo_connect (host, port);
 			}
-		} , reconnect_every*1000);
+		}, reconnect_every*1000);
 	}
 } else cryo_listen (port);
 

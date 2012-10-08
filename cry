@@ -140,7 +140,7 @@ case "$1" in
 	;;
 -U) # set userdata
 	[ -z "$2" ] && die "Missing argument"
-	cry_sign $USER | setprofile $KEYCHAIN/$USER
+	cry_sign $2 | setprofile $KEYCHAIN/$2
 	;;
 -v) # verify
 	cry_verify "$2"
