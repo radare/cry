@@ -122,7 +122,6 @@ function list_peers () {
 
 var offline = function () {
 	status ("offline");
-	console.log ("offline");
 }
 var sendmsg = offline;
 
@@ -135,8 +134,16 @@ function status(x) {
 	if (x) print (x)
 	return x? _status = x: _status;
 }
+
 function print (x) {
-	console.log ("\x1b0K\r"+x)
+	function atoi (x) {
+		if (x<10) return "0"+x
+		return x;
+	}
+	var util = require ('util')
+	var d = new Date ();
+	now = atoi (d.getHours ()) + ":" + atoi (d.getMinutes ())
+	console.log ("\r\x1b[0K"+now+" "+x)
 	rl.prompt (true);
 }
 
