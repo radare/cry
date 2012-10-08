@@ -6,11 +6,15 @@ var exec = require ("child_process").exec
 var spawn = require ("child_process").spawn
 var rl = require ('readline').createInterface (
 		process.stdin, process.stdout, completer);
+var use_udp = true
+var cmd_notify = "mplayer "+__dirname+"/lib/message.oga"
+var cmd_error = "mplayer "+__dirname+"/lib/error.oga"
 var UUID = 0;
 var port = 9999
 var host = undefined
 var iam = process.env ["USER"] || undefined
 var key = ''
+var udp_port = 9999;
 var cry = __dirname + "/cry"
 var forward = false; // not yet implemented
 var reconnect = true;
@@ -26,12 +30,12 @@ p.stdout.on ('data', function (data) {
 switch (process.argv.length) {
 case 4:
 	key = process.argv[2]
-	port = process.argv[3]
+	udp_port = port = process.argv[3]
 	break;
 case 5:
 	key = process.argv[2]
 	host = process.argv[3]
-	port = process.argv[4]
+	udp_port = port = process.argv[4]
 	break;
 default:
 	console.log ("client: cryo [pubkey] [host] [port]")
@@ -42,10 +46,15 @@ default:
 
 rl.set_prompt = function (x) {
 	var id = peer? peer.uuid: -1;
-	if (x) rl.setPrompt ('\x1b[32m<'+x+':'+id+'> \x1b[0m', (x+id).length+4);
+	if (x) rl.setPrompt ('['+key+'] \x1b[32m<'+x+':'+id+'> \x1b[0m', (key+x+id).length+7);
 }
 rl.set_prompt (iam)
 rl.prompt ();
+
+function system(x) {
+	var c = x.split (/ /g)
+	spawn(c[0], c.splice(1))
+}
 
 var cryo_import = function (name, key) {
 	var p = spawn (cry, ['-i', name, '-']);
@@ -113,7 +122,10 @@ function list_peers () {
 	}
 }
 
-var offline = function () { status ("offline"); }
+var offline = function () {
+	status ("offline");
+	system (cmd_error);
+}
 var sendmsg = offline;
 
 function peersend (data, type) {
@@ -184,6 +196,7 @@ function cryo_decode_msg (uuid, data) {
 		case 'msg':
 			dec (str, function (x, y) {
 				rl.set_prompt (x);
+				system (cmd_notify);
 				print ("<"+key+":"+uuid+"> "+y.trim ())
 			});
 			break;
@@ -320,6 +333,20 @@ var commands = {
 	'list': { callback: function() {
 			list_peers ()
 		}, help: "\tlist all peers" },
+	'lan': { callback: function(args) {
+			var cmd = args.splice(1).join (' ')
+			var client = dgram.createSocket ("udp4");
+			//client.setBroadcast (true)
+			client.bind ()
+			client.setBroadcast (true)
+			enc (cmd, function (str, y) {
+				str = new Buffer ("msg\n"+str)
+				client.send (str, 0, str.length, udp_port, "255.255.255.255", function (err, bytes) {
+				//client.send (str, 0, str.length, udp_port, "127.0.0.1", function (err, bytes) {
+					client.close();
+				});
+			});
+		}, help: "[m]\tsend lan message (udp broadcast)" },
 	'pub': { callback: function(args) {
 			if (args[1]) cryo_pub (args[1]);
 			else console.log ("Missing argument");
@@ -362,3 +389,13 @@ rl.on ('line', function (line) {
 	console.log ("^D");
 	process.exit (0);
 });
+
+if (use_udp && udp_port != 0) {
+	var dgram = require('dgram');
+	print ("listening udp packets on port "+udp_port)
+
+	var server = dgram.createSocket ("udp4", function (msg, rinfo) {
+		cryo_decode_msg ('udp', ""+msg)
+	});
+	server.bind (udp_port, '0.0.0.0')
+}
