@@ -14,7 +14,7 @@ PUBKEY=$KEY
 
 cry_verify () {
 	[ -n "$1" ] && USER=$1
-	base64 -d | openssl rsautl -verify -inkey $KEYCHAIN/$USER \
+	base64 --decode | openssl rsautl -verify -inkey $KEYCHAIN/$USER \
 		-pubin 2>/dev/null ||exit 1
 }
 
@@ -113,7 +113,7 @@ case "$1" in
 	;;
 -w)
 	F=$(mktemp /tmp/rsa.XXXXXX)
-	base64 -d > $F
+	base64 --decode > $F
 	(
 	cd $KEYCHAIN
 	for a in * ; do
@@ -174,7 +174,7 @@ case "$1" in
 		rm -f $F
 		exit 0
 	fi
-	base64 -d > $F
+	base64 --decode > $F
 	(
 	cd $KEYCHAIN
 	for a in * ; do
