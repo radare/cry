@@ -2,6 +2,7 @@
 # author: pancake
 # date: 2012-10-01
 
+VERSION=0.1
 # openssl ecparam -list_curves
 # NAME=secp256k1
 KEYSIZE=1024 # [32,128]-[4096]
@@ -129,6 +130,10 @@ case "$1" in
 	rm -f $F
 	exit 1
 	;;
+-V)
+	echo $VERSION
+	exit 0
+	;;
 -s) # sign
 	cry_sign "$2"
 	;;
@@ -213,6 +218,7 @@ Usage: cry [-opt] [...]
  -u [name]     get user profile
  -U [name]     set user profile (requires priv key)
  -v [name]     verify message from user
+ -V            show version
  -w            who is there
  -x [name]     show hash of given user
 EOF
